@@ -12,6 +12,8 @@ final Class Route {
   public $title = null;
   public $description;
   private static $instance;
+  private $current_route = array();
+  private $merge_route = array();
 
   private $configure = array();
   public $libs;
@@ -72,7 +74,7 @@ final Class Route {
   }
   private function analyze_route() {
     $regx = '((sy-:empresa/?)?(:controlador(/:metodo)?)?)';
-    $r = Route::getInstance()->routexl(null, $regx, array(
+    $r = Route::getInstance()->route_process(null, $regx, array(
       'empresa'     => '[\w\-]{3,25}',
       'controlador' => '[\w\_\-]{3,15}',
       'metodo'      => '[^\/]+',
@@ -165,7 +167,7 @@ final Class Route {
   }
   static function init() {
     $ce = static::g();
-    $url = isset($_GET['route_url']) ? $_GET['route_url'] : (isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : null);
+    $url = PHP_SAPI == 'cli' ? (isset($_SERVER['argv'][1]) ? $_SERVER['argv'][1] : '') : (isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : null);
     $url = $ce->clear($url);
     $ce->route = array(
       'main'  => '/' . $url,
@@ -225,12 +227,11 @@ final Class Route {
   static function debug($x) {
     return static::getInstance()->debug = $x;;
   }
-  public function route($route, $regexps = false, $started = false, $delete = true) {
+  private function route($route, $regexps = false, $started = false, $delete = true) {
     $query = $this->route['path'];
-
     if($this->rdebug) {
       echo "=========================================<br />\n";
-      $e = $this->routexl($query, $route, $regexps, $started, $delete, $cantidad);
+      $e = $this->route_process($query, $route, $regexps, $started, $delete, $cantidad);
       $deb = debug_backtrace();
       echo "File:  " . $deb[1]['file'] . ":" . $deb[1]['line'] . "<br />\n";
       echo "Query: " . json_encode($query) . "<br />\n";
@@ -243,7 +244,7 @@ final Class Route {
       echo "Canti: " . json_encode($cantidad) . "<br />\n";
       echo "========================================<br /><br />\n";
     } else {
-      $e = $this->routexl($query, $route, $regexps, $started, $delete, $cantidad);
+      $e = $this->route_process($query, $route, $regexps, $started, $delete, $cantidad);
     }
 #    var_dump(array($route, $query));
 #    echo $route;
@@ -260,7 +261,7 @@ final Class Route {
     }
     return $e;
   }
-  public function routexl($query, $route, $regexps = false, $started = false, $delete = true, &$cantidad = 0) {
+  private function route_process($query, $route, $regexps = false, $started = false, $delete = true, &$cantidad = 0) {
     if(is_null($query)) { /* TODO: le cambie a NOT NOT */
       $query = $this->route['main'];
       $query = $this->clear($query);
@@ -281,45 +282,64 @@ final Class Route {
     }
     return $e;
   }
-  public static function __callStatic($method, $params) {
-    if(count($params) < 1 || count($params) > 3) {
-      throw new Exception("ROUTE method invalid params");
-    }
-    if($method == 'else') {
-      if(is_callable($params[0])) {
-        $params[0]('Route:else');
-        exit;
-        return true;
-      } elseif(function_exists($params[0])) {
-        ($params[0])('Route:else');
-        exit;
-      }
-    }
-    $regex    = $params[0];
-    $eq       = null;
-    $callback = null;
-    if(isset($params[1])) {
-      if(is_callable($params[1])) {
-        $callback = $params[1];
-      } elseif(is_array($params[1])) {
-        $eq = $params[1];
-        $callback = isset($params[2]) ? $params[2] : null;
-      }
-    }
-    if(in_array($method, ['post','get','put','delete'])) {
-      if(strtolower($_SERVER['REQUEST_METHOD']) != $method) {
-        return false;
-      }
-    } elseif(in_array($method, ['any','path', 'tool'])) {
-    } else {
-      throw new Exception("ROUTE method invalid:" . $method);
-    }
-    $r = Route::getInstance()->route($regex, $eq, $method == 'path', $method != 'tool');
-    if($r && !is_null($callback) && is_callable($callback)) {
-      $callback($r, Route::getInstance()->route);
+  /* Methods */
+  public static function else($cb) {
+    if(is_callable($cb)) {
+      $cb('Route:else');
+      exit;
+      return true;
+    } elseif(function_exists($cb)) {
+      ($cb)('Route:else');
       exit;
     }
-    return $r;
+  }
+  private static function __request($method, $a1, $a2, $a3 = null) {
+    $ce = Route::getInstance();
+    $regex    = $a1;
+    $eq       = null;
+    $callback = null;
+    if($a3 === null) {
+      $callback = $a2;
+    } else {
+      $eq = $a2;
+      $callback = $a3;
+    }
+    if(PHP_SAPI !== 'cli') {
+      if(in_array($method, ['post','get','put','delete'])) {
+        if(strtolower($_SERVER['REQUEST_METHOD']) != $method) {
+          return $ce;
+        }
+      }
+    }
+    $r = $ce->route($regex, $eq, $method == 'path', true);
+    if($r && is_callable($callback)) {
+      if(is_array($ce->current_route)) {
+        $ce->merge_route = array_merge($ce->merge_route, $ce->current_route);
+      }
+      $ce->current_route = $r;
+      Closure::bind($callback, $ce)($ce);
+##      $callback($ce);
+      exit;
+    }
+    return $ce;
+  }
+  public static function any($a1, $a2, $a3 = null) {
+    return static::__request('any', $a1, $a2, $a3);
+  }
+  public static function post($a1, $a2, $a3 = null) {
+    return static::__request('post', $a1, $a2, $a3);
+  }
+  public static function get($a1, $a2, $a3 = null) {
+    return static::__request('get', $a1, $a2, $a3);
+  }
+  public static function put($a1, $a2, $a3 = null) {
+    return static::__request('put', $a1, $a2, $a3);
+  }
+  public static function delete($a1, $a2, $a3 = null) {
+    return static::__request('delete', $a1, $a2, $a3);
+  }
+  public static function path($a1, $a2, $a3 = null) {
+    return static::__request('path', $a1, $a2, $a3);
   }
   public static function setError($x) {
     Route::getInstance()->errores[] = array(

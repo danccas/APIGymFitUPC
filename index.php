@@ -29,7 +29,7 @@ Route::path('api', function() use($db) {
       ));
     }
   });
-  Route::post('account/login', function() use($db) {
+  Route::post('account/login', function($route) use($db) {
     $username = Route::input('username');
     $password = Route::input('password');
     

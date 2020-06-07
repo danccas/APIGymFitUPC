@@ -13,7 +13,9 @@ final Class Route {
   public $description;
   private static $instance;
   private $current_route = array();
-  private $merge_route = array();
+  private $merge_route   = array();
+  private $middlewares   = array();
+  public $middleware = null;
 
   private $configure = array();
   public $libs;
@@ -312,7 +314,12 @@ final Class Route {
       }
     }
     $r = $ce->route($regex, $eq, $method == 'path', true);
-    if($r && is_callable($callback)) {
+    if($r) {
+      $back = null;
+      foreach($ce->middlewares as $m) {
+        $back = ($m)($ce, $back);
+      }
+      $ce->middleware = $back;
       if(is_array($ce->current_route)) {
         $ce->merge_route = array_merge($ce->merge_route, $ce->current_route);
       }
@@ -320,6 +327,8 @@ final Class Route {
       Closure::bind($callback, $ce)($ce);
 ##      $callback($ce);
       exit;
+    } else {
+      $ce->middleware = null;
     }
     return $ce;
   }
@@ -346,6 +355,14 @@ final Class Route {
       'type'    => 'danger',
       'message' => $x,
     );
+  }
+  /* Middleware */
+  public static function add($callback) {
+    $ce = Route::getInstance();
+    if(is_callable($callback)) {
+      $ce->middlewares[] = $callback;
+    }
+    return $ce;
   }
   public static function setAlert($x) {
     Route::getInstance()->errores[] = array(

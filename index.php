@@ -146,7 +146,7 @@ Route::path('api', function() use($db) {
       'username' => $token['username'],
     ));
   });
-  Route::get('blog/list', function() use($db) {
+  Route::get('blog/list', function($ce) use($db) {
     $token = valid_token($db);
     $ls = $db->get('SELECT * FROM proveedor');
     $ls = array_map(function($n) {
